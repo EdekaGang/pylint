@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pylint.pyreverse.printer import EdgeType, NodeProperties, NodeType, Printer
 from pylint.pyreverse.utils import get_annotation_label
+from pylint.pyreverse.diagrams import Arity
 
 
 class MermaidJSPrinter(Printer):
@@ -69,6 +70,7 @@ class MermaidJSPrinter(Printer):
         self,
         from_node: str,
         to_node: str,
+        arity: Arity,
         type_: EdgeType,
         label: str | None = None,
     ) -> None:

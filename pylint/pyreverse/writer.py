@@ -86,6 +86,7 @@ class DiagramWriter:
             self.printer.emit_edge(
                 from_id,
                 to_id,
+                rel.arity,
                 type_=EdgeType.USES,
             )
 
@@ -99,6 +100,7 @@ class DiagramWriter:
             self.printer.emit_edge(
                 from_id,
                 to_id,
+                rel.arity,
                 type_=EdgeType.TYPE_DEPENDENCY,
             )
 
@@ -132,6 +134,7 @@ class DiagramWriter:
             self.printer.emit_edge(
                 rel.from_object.fig_id,
                 rel.to_object.fig_id,
+                rel.arity,
                 type_=EdgeType.INHERITS,
             )
         associations: dict[str, set[str]] = defaultdict(set)
@@ -141,6 +144,7 @@ class DiagramWriter:
             self.printer.emit_edge(
                 rel.from_object.fig_id,
                 rel.to_object.fig_id,
+                rel.arity,
                 label=rel.name,
                 type_=EdgeType.ASSOCIATION,
             )
@@ -151,6 +155,7 @@ class DiagramWriter:
             self.printer.emit_edge(
                 rel.from_object.fig_id,
                 rel.to_object.fig_id,
+                rel.arity,
                 label=rel.name,
                 type_=EdgeType.AGGREGATION,
             )

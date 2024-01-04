@@ -8,6 +8,7 @@ from pylint.pyreverse.dot_printer import DotPrinter
 from pylint.pyreverse.mermaidjs_printer import HTMLMermaidJSPrinter, MermaidJSPrinter
 from pylint.pyreverse.plantuml_printer import PlantUmlPrinter
 from pylint.pyreverse.printer import Printer
+from pylint.pyreverse.diagrams import Arity
 
 filetype_to_printer: dict[str, type[Printer]] = {
     "plantuml": PlantUmlPrinter,

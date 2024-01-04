@@ -14,7 +14,28 @@ from astroid import nodes, util
 
 from pylint.checkers.utils import decorated_with_property, in_type_checking_block
 from pylint.pyreverse.utils import FilterMixIn
+import math
+import re
+import sys
 
+def is_none(value: asteroid.NodeNG) -> bool:
+    return isinstance(value, astroid.node_classes.Const) and value.kind == None
+
+class Arity:
+    def __init__(self, minimum: int=1, maximum: int=1) -> None:
+        self.minimum: int = minimum
+        self.maximum: int = maximum
+
+    def update(self, other: Arity) -> None:
+        self.minimum = min(self.minimum, other.minimum)
+        self.maximum = max(self.maximum, other.maximum)
+
+    def __str__(self) -> str:
+        if self.minimum == 1 and self.maximum == 1:
+            return ""
+        if self.maximum == sys.maxsize:
+            return f"\"{self.minimum}..*\""
+        return f"\"{self.minimum}..{self.maximum}\""
 
 class Figure:
     """Base class for counter handling."""
@@ -31,6 +52,7 @@ class Relationship(Figure):
         from_object: DiagramEntity,
         to_object: DiagramEntity,
         relation_type: str,
+        arity: Arity,
         name: str | None = None,
     ):
         super().__init__()
@@ -38,6 +60,7 @@ class Relationship(Figure):
         self.to_object = to_object
         self.type = relation_type
         self.name = name
+        self.arity = arity
 
 
 class DiagramEntity(Figure):
@@ -89,7 +112,7 @@ class ClassDiagram(Figure, FilterMixIn):
         # TODO: Specify 'Any' after refactor of `DiagramEntity`
         self.objects: list[Any] = []
         self.relationships: dict[str, list[Relationship]] = {}
-        self._nodes: dict[nodes.NodeNG, DiagramEntity] = {}
+        self._nodes: dict[str, DiagramEntity] = {}
 
     def get_relationships(self, role: str) -> Iterable[Relationship]:
         # sorted to get predictable (hence testable) results
@@ -103,10 +126,11 @@ class ClassDiagram(Figure, FilterMixIn):
         from_object: DiagramEntity,
         to_object: DiagramEntity,
         relation_type: str,
+        arity: Arity,
         name: str | None = None,
     ) -> None:
         """Create a relationship."""
-        rel = Relationship(from_object, to_object, relation_type, name)
+        rel = Relationship(from_object, to_object, relation_type, arity, name)
         self.relationships.setdefault(relation_type, []).append(rel)
 
     def get_relationship(
@@ -137,8 +161,12 @@ class ClassDiagram(Figure, FilterMixIn):
             if not self.show_attr(node_name):
                 continue
             names = self.class_names(associated_nodes)
+            if 'NoneType' in names:
+                names.remove('NoneType')
+                
             if names:
                 node_name = f"{node_name} : {', '.join(names)}"
+            
             attrs.append(node_name)
         return sorted(attrs)
 
@@ -152,13 +180,14 @@ class ClassDiagram(Figure, FilterMixIn):
             and not decorated_with_property(m)
             and self.show_attr(m.name)
         ]
+
         return sorted(methods, key=lambda n: n.name)
 
     def add_object(self, title: str, node: nodes.ClassDef) -> None:
         """Create a diagram object."""
-        assert node not in self._nodes
+        assert node.name not in self._nodes
         ent = ClassEntity(title, node)
-        self._nodes[node] = ent
+        self._nodes[node.name] = ent
         self.objects.append(ent)
 
     def class_names(self, nodes_lst: Iterable[nodes.NodeNG]) -> list[str]:
@@ -186,11 +215,14 @@ class ClassDiagram(Figure, FilterMixIn):
 
     def has_node(self, node: nodes.NodeNG) -> bool:
         """Return true if the given node is included in the diagram."""
-        return node in self._nodes
+        return node.name in self._nodes
+
 
     def object_from_node(self, node: nodes.NodeNG) -> DiagramEntity:
         """Return the diagram object mapped to node."""
-        return self._nodes[node]
+        if not hasattr(node, "name"):
+            raise KeyError()
+        return self._nodes[node.name]
 
     def classes(self) -> list[ClassEntity]:
         """Return all class nodes in the diagram."""
@@ -214,7 +246,7 @@ class ClassDiagram(Figure, FilterMixIn):
             for par_node in node.ancestors(recurs=False):
                 try:
                     par_obj = self.object_from_node(par_node)
-                    self.add_relationship(obj, par_obj, "specialization")
+                    self.add_relationship(obj, par_obj, "specialization", Arity())
                 except KeyError:
                     continue
 
@@ -222,7 +254,7 @@ class ClassDiagram(Figure, FilterMixIn):
             for name, values in list(node.aggregations_type.items()):
                 for value in values:
                     self.assign_association_relationship(
-                        value, obj, name, "aggregation"
+                        value, obj, name, "aggregation", Arity()
                     )
 
             associations = node.associations_type.copy()
@@ -234,22 +266,74 @@ class ClassDiagram(Figure, FilterMixIn):
             for name, values in associations.items():
                 for value in values:
                     self.assign_association_relationship(
-                        value, obj, name, "association"
+                        value, obj, name, "association", Arity()
                     )
 
     def assign_association_relationship(
-        self, value: astroid.NodeNG, obj: ClassEntity, name: str, type_relationship: str
+        self, value: astroid.NodeNG, obj: ClassEntity, name: str, type_relationship: str, arity: Arity,
     ) -> None:
+        
         if isinstance(value, util.UninferableBase):
             return
         if isinstance(value, astroid.Instance):
             value = value._proxied
+        err = False
         try:
             associated_obj = self.object_from_node(value)
-            self.add_relationship(associated_obj, obj, type_relationship, name)
+            self.add_relationship(associated_obj, obj, type_relationship, arity, name)
+        except KeyError:
+            err = True
+
+        if not err:
+            return
+
+        (new_value, arities) = self.arities_from_values(value)
+
+        if new_value == value:
+            return
+
+        try: 
+            associated_obj = self.object_from_node(new_value)
+            self.add_relationship(associated_obj, obj, type_relationship, arities, name)
         except KeyError:
             return
 
+    def arities_from_values(self, value: astroid.NodeNG) -> (asteroid.NodeNG, Arity):
+        if isinstance(value, astroid.Subscript):
+            # unions are ignored, as they are not nicely modelable
+            if value.value.name.lower() == 'list':
+                arr = Arity(0, sys.maxsize)
+            elif value.value.name.lower() == 'tuple':
+                arr = Arity(1, sys.maxsize)
+            elif value.value.name.lower() == 'dict':
+                arr = Arity(0, sys.maxsize)
+            else:
+                arr = Arity(0, sys.maxsize)
+
+            (value, arities) = self.arities_from_values(value.slice)
+            arr.update(arities)
+
+            return (value, arr)
+        
+        if isinstance(value, astroid.Name):
+            opt = re.search('^Optional\[(.*)\]$', value.name)
+            if opt:
+                return (astroid.Name(opt.groups()[0], value.lineno, value.col_offset, value, end_lineno=value.lineno, end_col_offset=None), Arity(0, 1))
+
+        # here only the operation '|' is checked for 
+        # additionally only ops in which either the left or the right are none are taken
+        if isinstance(value, astroid.BinOp) and value.op == '|':
+            if is_none(value.left):
+                (value, arities) = self.arities_from_values(value.right)
+            elif is_none(value.right):
+                (value, arities) = self.arities_from_values(value.left)
+            else:
+                # could not parse
+                return (value, Arity())
+            arr: Arity = Arity(0, 1)
+            arr.update(arities)
+            return (value, arr)
+        return (value, Arity())
 
 class PackageDiagram(ClassDiagram):
     """Package diagram handling."""
@@ -269,9 +353,11 @@ class PackageDiagram(ClassDiagram):
 
     def add_object(self, title: str, node: nodes.Module) -> None:
         """Create a diagram object."""
-        assert node not in self._nodes
+        if not hasattr(node, "name"):
+            print(node)
+        assert node.name not in self._nodes
         ent = PackageEntity(title, node)
-        self._nodes[node] = ent
+        self._nodes[node.name] = ent
         self.objects.append(ent)
 
     def get_module(self, name: str, node: nodes.Module) -> PackageEntity:
@@ -310,7 +396,7 @@ class PackageDiagram(ClassDiagram):
             # ownership
             try:
                 mod = self.object_from_node(class_obj.node.root())
-                self.add_relationship(class_obj, mod, "ownership")
+                self.add_relationship(class_obj, mod, "ownership", Arity())
             except KeyError:
                 continue
         for package_obj in self.modules():
@@ -321,11 +407,11 @@ class PackageDiagram(ClassDiagram):
                     dep = self.get_module(dep_name, package_obj.node)
                 except KeyError:
                     continue
-                self.add_relationship(package_obj, dep, "depends")
+                self.add_relationship(package_obj, dep, "depends", Arity())
 
             for dep_name in package_obj.node.type_depends:
                 try:
                     dep = self.get_module(dep_name, package_obj.node)
                 except KeyError:  # pragma: no cover
                     continue
-                self.add_relationship(package_obj, dep, "type_depends")
+                self.add_relationship(package_obj, dep, "type_depends", Arity())

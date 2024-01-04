@@ -13,6 +13,7 @@ from typing import NamedTuple
 from astroid import nodes
 
 from pylint.pyreverse.utils import get_annotation_label
+from pylint.pyreverse.diagrams import Arity
 
 
 class NodeType(Enum):
@@ -95,6 +96,7 @@ class Printer(ABC):
         self,
         from_node: str,
         to_node: str,
+        arity: Arity,
         type_: EdgeType,
         label: str | None = None,
     ) -> None:

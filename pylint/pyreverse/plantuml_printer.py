@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pylint.pyreverse.printer import EdgeType, Layout, NodeProperties, NodeType, Printer
 from pylint.pyreverse.utils import get_annotation_label
+from pylint.pyreverse.diagrams import Arity, is_none
 
 
 class PlantUmlPrinter(Printer):
@@ -68,8 +69,8 @@ class PlantUmlPrinter(Printer):
                 args = self._get_method_arguments(func)
                 line = "{abstract}" if func.is_abstract() else ""
                 line += f"{func.name}({', '.join(args)})"
-                if func.returns:
-                    line += " -> " + get_annotation_label(func.returns)
+                if not is_none(func.returns):
+                    line += " : " + get_annotation_label(func.returns)
                 body.append(line)
         label = properties.label if properties.label is not None else name
         if properties.fontcolor and properties.fontcolor != self.DEFAULT_COLOR:
@@ -85,11 +86,12 @@ class PlantUmlPrinter(Printer):
         self,
         from_node: str,
         to_node: str,
+        arity: Arity,
         type_: EdgeType,
         label: str | None = None,
     ) -> None:
         """Create an edge from one node to another to display relationships."""
-        edge = f"{from_node} {self.ARROWS[type_]} {to_node}"
+        edge = f"{from_node} {str(arity)} {self.ARROWS[type_]} {to_node}"
         if label:
             edge += f" : {label}"
         self.emit(edge)

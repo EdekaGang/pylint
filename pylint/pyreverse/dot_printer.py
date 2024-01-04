@@ -16,7 +16,7 @@ from astroid import nodes
 
 from pylint.pyreverse.printer import EdgeType, Layout, NodeProperties, NodeType, Printer
 from pylint.pyreverse.utils import get_annotation_label
-
+from pylint.pyreverse.diagrams import Arity
 
 class HTMLLabels(Enum):
     LINEBREAK_LEFT = '<br ALIGN="LEFT"/>'
@@ -141,6 +141,7 @@ class DotPrinter(Printer):
         self,
         from_node: str,
         to_node: str,
+        arity: Arity,
         type_: EdgeType,
         label: str | None = None,
     ) -> None:
